@@ -1,0 +1,5 @@
+selenium==4.29.0
+pandas==2.2.3
+xlsxwriter==3.2.2
+python-dotenv==1.0.1
+webdriver-manager==4.0.2
