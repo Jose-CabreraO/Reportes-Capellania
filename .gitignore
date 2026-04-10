@@ -8,7 +8,10 @@ Joel Rodriguez/
 *.xlsx
 *.csv
 
+
+
 # Ocultar registros de errores y archivos temporales
 log_ejecucion.txt
 __pycache__/
 .vscode/
+empresas.json
