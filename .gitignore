@@ -1,0 +1,14 @@
+# Ocultar credenciales y URL sensible
+.env
+
+# Ocultar los datos reales generados (Privacidad de la empresa)
+Nestor Ruiz/
+Carlos Delgado/
+Joel Rodriguez/
+*.xlsx
+*.csv
+
+# Ocultar registros de errores y archivos temporales
+log_ejecucion.txt
+__pycache__/
+.vscode/
