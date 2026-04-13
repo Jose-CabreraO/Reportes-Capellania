@@ -14,7 +14,6 @@ import json
 load_dotenv()
 
 def cargar_empresas():
-    # Intenta cargar el JSON real, si no existe usa el de ejemplo
     archivo = 'empresas.json' if os.path.exists('empresas.json') else 'empresas_example.json'
     with open(archivo, 'r', encoding='utf-8') as f:
         return json.load(f)
@@ -63,7 +62,7 @@ def generar_excel_formateado(df, ruta, nombre_empresa):
             for col_num, val in enumerate(row):
                 worksheet.write(row_num + 2, col_num + 1, val, fmt)
 
-        # --- GRÁFICO ---
+        # --- GRÁFICO (RESTAURADO: SIN FONDO / SIN BORDE) ---
         chart = workbook.add_chart({'type': 'column'})
         num_sucursales = len(tabla_refl) - 1 
 
@@ -76,18 +75,21 @@ def generar_excel_formateado(df, ruta, nombre_empresa):
                 'border':     {'color': 'black'},
             })
 
+        # Restaurando transparencia total
         chart.set_chartarea({'border': {'none': True}, 'fill': {'none': True}})
         chart.set_plotarea({'border': {'none': True}, 'fill': {'none': True}})
-        chart.set_y_axis({'visible': False})
-        chart.set_title({'name': f'Reflexiones - {nombre_empresa}', 'name_font': {'bold': True}})
+        chart.set_y_axis({'visible': False, 'major_gridlines': {'visible': False}})
+        chart.set_x_axis({'major_gridlines': {'visible': False}})
+        
+        chart.set_title({'name': f'Reflexiones - {nombre_empresa}', 'name_font': {'size': 14, 'bold': True}})
         chart.set_table({'show_keys': True})
         chart.set_legend({'none': True})
         
         worksheet.insert_chart('G2', chart, {'x_scale': 1.3, 'y_scale': 1.1})
 
-        # 2. TABLAS DE CONSEJERÍAS Y VISITAS
+        # 2. TABLAS ADICIONALES (Incluyendo Decisiones)
         fila_inicio = len(tabla_refl) + 5
-        for metrica in ["Consejerias", "Visitas"]:
+        for metrica in ["Decisiones", "Consejerias", "Visitas"]:
             df_m = df[df['Metrica'] == metrica]
             if not df_m.empty:
                 worksheet.write(fila_inicio, 0, f"Resumen de {metrica}", workbook.add_format({'bold': True}))
@@ -111,6 +113,7 @@ def generar_excel_formateado(df, ruta, nombre_empresa):
 
 def procesar_informes():
     options = webdriver.ChromeOptions()
+    # options.add_argument("--headless") # Descomenta si quieres modo fantasma
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     wait = WebDriverWait(driver, 15)
 
@@ -125,10 +128,8 @@ def procesar_informes():
                 os.makedirs(supervisor)
 
             for item in empresas:
-                # Lógica de Simple vs Grupo
                 nombre_reporte = item["nombre_web"] if item["tipo"] == "simple" else item["nombre_reporte"]
                 entidades_a_buscar = [item["nombre_web"]] if item["tipo"] == "simple" else item["hijas"]
-                
                 ruta_final = os.path.join(supervisor, f"{nombre_reporte.replace('/', '_')}.xlsx")
 
                 if os.path.exists(ruta_final):
@@ -159,25 +160,36 @@ def procesar_informes():
                             time.sleep(4) 
 
                             filas = driver.find_elements(By.CSS_SELECTOR, "table tr")
-                            
                             encontrado_en_mes = False
+                            
                             for fila in filas[1:]:
                                 cols = fila.find_elements(By.TAG_NAME, "td")
-                                if len(cols) > 5 and cols[0].text.strip() != "":
-                                    # Si es grupo, usamos el nombre de la empresa hija como "Sucursal"
+                                if len(cols) > 7 and cols[0].text.strip() != "":
                                     suc = entidad_web if item["tipo"] == "grupo" else cols[0].text.strip()
                                     sucursales_conocidas.add(suc)
                                     
-                                    datos_acumulados.append({"Sucursal": suc, "Mes": mes, "Metrica": "Asistencia", "Valor": int(cols[1].text) if cols[1].text.isdigit() else 0})
-                                    datos_acumulados.append({"Sucursal": suc, "Mes": mes, "Metrica": "Consejerias", "Valor": int(cols[3].text) if cols[3].text.isdigit() else 0})
-                                    datos_acumulados.append({"Sucursal": suc, "Mes": mes, "Metrica": "Visitas", "Valor": int(cols[4].text) if cols[4].text.isdigit() else 0})
+                                    # EXTRACCIÓN REAL DE LAS COLUMNAS
+                                    v_asist = int(cols[1].text) if cols[1].text.isdigit() else 0
+                                    v_cons  = int(cols[3].text) if cols[3].text.isdigit() else 0
+                                    v_visi  = int(cols[4].text) if cols[4].text.isdigit() else 0
+                                    v_deci  = int(cols[7].text) if cols[7].text.isdigit() else 0 # <-- COLUMNA 7
+
+                                    # AUDITORÍA DE CEROS (RESTABLECIDA)
+                                    if v_asist == 0 and v_cons == 0 and v_visi == 0 and v_deci == 0:
+                                        with open("alertas_datos_vacios.txt", "a", encoding="utf-8") as fa:
+                                            fa.write(f"ALERTA: [{supervisor}] {entidad_web} tiene 0 en {mes}\n")
+
+                                    datos_acumulados.append({"Sucursal": suc, "Mes": mes, "Metrica": "Asistencia", "Valor": v_asist})
+                                    datos_acumulados.append({"Sucursal": suc, "Mes": mes, "Metrica": "Consejerias", "Valor": v_cons})
+                                    datos_acumulados.append({"Sucursal": suc, "Mes": mes, "Metrica": "Visitas", "Valor": v_visi})
+                                    datos_acumulados.append({"Sucursal": suc, "Mes": mes, "Metrica": "Decisiones", "Valor": v_deci})
                                     encontrado_en_mes = True
                             
                             if not encontrado_en_mes:
-                                # Forzado de ceros
+                                # Forzado de ceros (Incluyendo Decisiones)
                                 target_sucs = [entidad_web] if item["tipo"] == "grupo" else (list(sucursales_conocidas) if sucursales_conocidas else ["General"])
                                 for s in target_sucs:
-                                    for m in ["Asistencia", "Consejerias", "Visitas"]:
+                                    for m in ["Asistencia", "Consejerias", "Visitas", "Decisiones"]:
                                         datos_acumulados.append({"Sucursal": s, "Mes": mes, "Metrica": m, "Valor": 0})
 
                     if datos_acumulados:
