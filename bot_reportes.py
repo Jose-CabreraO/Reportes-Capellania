@@ -43,9 +43,11 @@ def generar_excel_formateado(df, ruta, nombre_empresa):
         fmt_total = workbook.add_format({'bold': True, 'border': 1, 'bg_color': '#F2F2F2'})
         fmt_header = workbook.add_format({'bold': True, 'border': 1, 'bg_color': '#D9D9D9', 'align': 'center'})
 
-        # 1. TABLA DE REFLEXIONES (CON GRÁFICO)
+        # 1. TABLA DE REFLEXIONES (CAMBIADO A SUM PARA AGRUPAR GRUPOS)
         df_refl = df[df['Metrica'] == 'Asistencia']
-        tabla_refl = df_refl.pivot_table(index='Sucursal', columns='Mes', values='Valor', aggfunc='first').fillna(0)
+        # CAMBIO: 'sum' permite que AgroMani (17, 28, 6) se convierta en 51
+        tabla_refl = df_refl.pivot_table(index='Sucursal', columns='Mes', values='Valor', aggfunc='sum').fillna(0)
+        
         orden_meses = [m for m in MESES if m in tabla_refl.columns]
         tabla_refl = tabla_refl.reindex(columns=orden_meses)
         
@@ -62,7 +64,7 @@ def generar_excel_formateado(df, ruta, nombre_empresa):
             for col_num, val in enumerate(row):
                 worksheet.write(row_num + 2, col_num + 1, val, fmt)
 
-        # --- GRÁFICO (RESTAURADO: SIN FONDO / SIN BORDE) ---
+        # --- GRÁFICO ---
         chart = workbook.add_chart({'type': 'column'})
         num_sucursales = len(tabla_refl) - 1 
 
@@ -75,7 +77,6 @@ def generar_excel_formateado(df, ruta, nombre_empresa):
                 'border':     {'color': 'black'},
             })
 
-        # Restaurando transparencia total
         chart.set_chartarea({'border': {'none': True}, 'fill': {'none': True}})
         chart.set_plotarea({'border': {'none': True}, 'fill': {'none': True}})
         chart.set_y_axis({'visible': False, 'major_gridlines': {'visible': False}})
@@ -87,13 +88,14 @@ def generar_excel_formateado(df, ruta, nombre_empresa):
         
         worksheet.insert_chart('G2', chart, {'x_scale': 1.3, 'y_scale': 1.1})
 
-        # 2. TABLAS ADICIONALES (Incluyendo Decisiones)
+        # 2. TABLAS ADICIONALES (CAMBIADO A SUM)
         fila_inicio = len(tabla_refl) + 5
         for metrica in ["Decisiones", "Consejerias", "Visitas"]:
             df_m = df[df['Metrica'] == metrica]
             if not df_m.empty:
                 worksheet.write(fila_inicio, 0, f"Resumen de {metrica}", workbook.add_format({'bold': True}))
-                tabla_m = df_m.pivot_table(index='Sucursal', columns='Mes', values='Valor', aggfunc='first').fillna(0)
+                # CAMBIO: 'sum' para métricas secundarias
+                tabla_m = df_m.pivot_table(index='Sucursal', columns='Mes', values='Valor', aggfunc='sum').fillna(0)
                 tabla_m = tabla_m.reindex(columns=orden_meses)
                 
                 worksheet.write(fila_inicio + 1, 0, 'Sucursal', fmt_header)
@@ -113,7 +115,9 @@ def generar_excel_formateado(df, ruta, nombre_empresa):
 
 def procesar_informes():
     options = webdriver.ChromeOptions()
-    # options.add_argument("--headless") # Descomenta si quieres modo fantasma
+    options.add_argument("--headless=new") 
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-notifications")
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     wait = WebDriverWait(driver, 15)
 
@@ -165,16 +169,17 @@ def procesar_informes():
                             for fila in filas[1:]:
                                 cols = fila.find_elements(By.TAG_NAME, "td")
                                 if len(cols) > 7 and cols[0].text.strip() != "":
+                                    # CAMBIO CLAVE: Usamos entidad_web para que el pivot_table sume 
+                                    # todas las filas bajo el mismo nombre de empresa padre/hija buscada
                                     suc = entidad_web if item["tipo"] == "grupo" else cols[0].text.strip()
                                     sucursales_conocidas.add(suc)
                                     
-                                    # EXTRACCIÓN REAL DE LAS COLUMNAS
                                     v_asist = int(cols[1].text) if cols[1].text.isdigit() else 0
                                     v_cons  = int(cols[3].text) if cols[3].text.isdigit() else 0
                                     v_visi  = int(cols[4].text) if cols[4].text.isdigit() else 0
-                                    v_deci  = int(cols[7].text) if cols[7].text.isdigit() else 0 # <-- COLUMNA 7
+                                    v_deci  = int(cols[7].text) if cols[7].text.isdigit() else 0
 
-                                    # AUDITORÍA DE CEROS (RESTABLECIDA)
+                                    # AUDITORÍA DE CEROS
                                     if v_asist == 0 and v_cons == 0 and v_visi == 0 and v_deci == 0:
                                         with open("alertas_datos_vacios.txt", "a", encoding="utf-8") as fa:
                                             fa.write(f"ALERTA: [{supervisor}] {entidad_web} tiene 0 en {mes}\n")
@@ -186,7 +191,7 @@ def procesar_informes():
                                     encontrado_en_mes = True
                             
                             if not encontrado_en_mes:
-                                # Forzado de ceros (Incluyendo Decisiones)
+                                # Forzado de ceros con lógica original de sucursales conocidas
                                 target_sucs = [entidad_web] if item["tipo"] == "grupo" else (list(sucursales_conocidas) if sucursales_conocidas else ["General"])
                                 for s in target_sucs:
                                     for m in ["Asistencia", "Consejerias", "Visitas", "Decisiones"]:
